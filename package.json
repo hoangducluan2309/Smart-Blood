@@ -1,0 +1,21 @@
+{
+  "name": "smartblood-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:backend": "pnpm --filter @smartblood/backend dev",
+    "build:backend": "pnpm --filter @smartblood/backend build",
+    "typecheck": "pnpm --filter @smartblood/backend typecheck",
+    "test:unit": "pnpm --filter @smartblood/backend test:unit",
+    "test:integration": "pnpm --filter @smartblood/backend test:integration",
+    "test:e2e": "pnpm --filter @smartblood/backend test:e2e",
+    "test": "pnpm --filter @smartblood/backend test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "bcrypt",
+      "esbuild"
+    ]
+  }
+}
