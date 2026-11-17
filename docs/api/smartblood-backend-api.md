@@ -117,13 +117,16 @@ All endpoints require `RED_CROSS_STAFF` or `ADMIN`.
 
 | Method | Path | Guard | Schema / Query | Behavior |
 | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/auth/register-donor` | `authRateLimiter` | `cccd`, `ngaySinh`, `email`, `matKhau` | Creates `PENDING_VERIFY` account linked to verified `Donors` row + sends 6-digit email OTP (5m TTL) |
-| `POST` | `/api/v1/auth/verify-email-otp` | `authRateLimiter` | `email`, `cccd`, `ngaySinh`, `otp` | Activates `ACTIVE` user after max 3 attempts |
-| `POST` | `/api/v1/auth/login` | `authRateLimiter` | `identifier` (email or CCCD), `matKhau` | Progressive temp lock on 5 failures (3m -> 15m -> 1h via `MemoryStore`, never auto-`LOCKED`); returns JWT (`2h` TTL) |
+| `POST` | `/api/v1/auth/register-donor` | `authRateLimiter` | `registerDonorSchema`: `cccd`, `ngaySinh`, `email`, `matKhau`, `hoTen?`, `gioiTinh?`, `soDienThoai?`, `diaChi?`, `nhomMau?`, `rhFactor?` | Creates `PENDING_VERIFY` user linked to `Donors` row (or pre-creates donor record if new) + sends 6-digit email OTP (5m TTL) |
+| `POST` | `/api/v1/auth/verify-email-otp` | `authRateLimiter` | `email`, `cccd`, `ngaySinh`, `otp` | Activates `ACTIVE` user after max 3 attempts; returns `accessToken`, `user`, and donor `profile` |
+| `POST` | `/api/v1/auth/login` | `authRateLimiter` | `identifier` (email or CCCD), `matKhau` | Progressive temp lock on 5 failures (3m -> 15m -> 1h via `MemoryStore`, never auto-`LOCKED`); returns JWT (`2h` TTL), `user`, and detailed `profile` |
+| `GET` | `/api/v1/auth/me` | JWT | — | Returns authenticated user details and profile (`DonorProfile` or `HospitalProfile`) |
 | `POST` | `/api/v1/auth/forgot-password` | `authRateLimiter` | `email` | Uniform 200 anti-enumeration response; 60s resend cooldown |
 | `POST` | `/api/v1/auth/reset-password` | `authRateLimiter` | `email`, `otp`, `matKhauMoi` | Resets bcrypt hash & clears temp brute-force lock |
 | `GET` | `/api/v1/admin/users` | `ADMIN` | `vaiTro?`, `trangThai?`, `page`, `limit` | Lists accounts with real-time `tempLocked` flag |
 | `PATCH` | `/api/v1/admin/users/:userId/status` | `ADMIN` | `trangThai` (`ACTIVE\|LOCKED`) | Calls `sp_AdminUpdateUserStatus` (blocks self-lock) & clears `lock:user:{userId}` on unlock |
+| `GET` | `/api/v1/donor/profile` | `REGISTERED_DONOR` | — | Retrieves donor's personal profile (auto-decrypts rare blood contact from Vault for own view) |
+| `PATCH` | `/api/v1/donor/profile` | `REGISTERED_DONOR` | `updateDonorProfileSchema`: `soDienThoai?`, `diaChi?` | Updates donor contact details (re-encrypts into RareBloodVault if `laNhomMauHiem = 1`) |
 | `GET` | `/api/v1/donor/history` | `REGISTERED_DONOR` | `historyListQuerySchema` | Returns donation history + 84-day recovery progress |
 | `GET` | `/api/v1/donor/certificate/:historyId/download` | `REGISTERED_DONOR` | `historyIdParamSchema` | Streams landscape A4 PDF certificate with QR verification URL |
 

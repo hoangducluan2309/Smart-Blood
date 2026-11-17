@@ -58,20 +58,55 @@ export interface CertificateRow {
   maVachTuiMau: string;
 }
 
-export async function callRegisterDonorAccount(options: {
+export interface RawUserProfileRow {
+  profileType: 'DONOR' | 'HOSPITAL' | 'NONE';
+  donorId: string | null;
+  cccd: string | null;
+  hoTen: string | null;
+  ngaySinh: Date | null;
+  gioiTinh: string | null;
+  soDienThoai: string | null;
+  diaChi: string | null;
+  nhomMau: BloodType | null;
+  rhFactor: RhFactor | null;
+  laNhomMauHiem: boolean | null;
+  hospitalId: string | null;
+  tenBenhVien: string | null;
+  benhVienDiaChi: string | null;
+  benhVienSoDienThoai: string | null;
+}
+
+export interface RegisterDonorOptions {
   cccd: string;
   ngaySinh: string;
   email: string;
   matKhauHash: string;
+  hoTen?: string;
+  gioiTinh?: string;
+  soDienThoai?: string;
+  diaChi?: string;
+  nhomMau?: string;
+  rhFactor?: string;
   ip: string | null;
-}) {
-  const req = mainPool.request();
-  req.input('CCCD', sql.Char(12), options.cccd);
-  req.input('NgaySinh', sql.Date, options.ngaySinh);
-  req.input('Email', sql.NVarChar(255), options.email);
-  req.input('MatKhauHash', sql.VarChar(255), options.matKhauHash);
-  req.input('DiaChiIP', sql.VarChar(45), options.ip);
+}
 
+function bindRegisterInputs(req: sql.Request, opt: RegisterDonorOptions): void {
+  req.input('CCCD', sql.Char(12), opt.cccd);
+  req.input('NgaySinh', sql.Date, opt.ngaySinh);
+  req.input('Email', sql.NVarChar(255), opt.email);
+  req.input('MatKhauHash', sql.VarChar(255), opt.matKhauHash);
+  req.input('HoTen', sql.NVarChar(150), opt.hoTen ?? null);
+  req.input('GioiTinh', sql.NVarChar(10), opt.gioiTinh ?? null);
+  req.input('SoDienThoai', sql.VarChar(15), opt.soDienThoai ?? null);
+  req.input('DiaChi', sql.NVarChar(255), opt.diaChi ?? null);
+  req.input('NhomMau', sql.VarChar(5), opt.nhomMau ?? null);
+  req.input('RhFactor', sql.Char(1), opt.rhFactor ?? null);
+  req.input('DiaChiIP', sql.VarChar(45), opt.ip);
+}
+
+export async function callRegisterDonorAccount(options: RegisterDonorOptions) {
+  const req = mainPool.request();
+  bindRegisterInputs(req, options);
   const res = await req.execute<{
     userId: string;
     donorId: string;
@@ -283,5 +318,32 @@ export async function callAdminUpdateUserStatus(options: {
     emailDaXacThuc: boolean;
     trangThai: UserStatus;
   }>('dbo.sp_AdminUpdateUserStatus');
+  return res.recordset[0]!;
+}
+
+export async function queryUserProfile(userId: string): Promise<RawUserProfileRow | null> {
+  const req = mainPool.request();
+  req.input('UserId', sql.UniqueIdentifier, userId);
+  const res = await req.execute<RawUserProfileRow>('dbo.sp_GetDonorProfile');
+  return res.recordset[0] ?? null;
+}
+
+export async function callUpdateDonorProfile(options: {
+  userId: string;
+  soDienThoai?: string;
+  diaChi?: string;
+  ip: string | null;
+}) {
+  const req = mainPool.request();
+  req.input('UserId', sql.UniqueIdentifier, options.userId);
+  req.input('SoDienThoai', sql.VarChar(15), options.soDienThoai ?? null);
+  req.input('DiaChi', sql.NVarChar(255), options.diaChi ?? null);
+  req.input('DiaChiIP', sql.VarChar(45), options.ip);
+  const res = await req.execute<{
+    donorId: string;
+    soDienThoai: string | null;
+    diaChi: string | null;
+    laNhomMauHiem: boolean;
+  }>('dbo.sp_UpdateDonorProfile');
   return res.recordset[0]!;
 }

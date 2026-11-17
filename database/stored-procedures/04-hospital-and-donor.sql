@@ -355,12 +355,19 @@ GO
 
 -- ----------------------------------------------------------------------------
 -- sp_RegisterDonorAccount: Dang ky tai khoan lien ket ho so CCCD (PENDING_VERIFY)
+-- Ho tro ca nguoi da tung hien mau (auto-link) va nguoi moi dang ky truc tuyen
 -- ----------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.sp_RegisterDonorAccount
     @CCCD CHAR(12),
     @NgaySinh DATE,
     @Email NVARCHAR(255),
     @MatKhauHash VARCHAR(255),
+    @HoTen NVARCHAR(150) = NULL,
+    @GioiTinh NVARCHAR(10) = NULL,
+    @SoDienThoai VARCHAR(15) = NULL,
+    @DiaChi NVARCHAR(300) = NULL,
+    @NhomMau VARCHAR(2) = NULL,
+    @RhFactor CHAR(1) = NULL,
     @DiaChiIP VARCHAR(45) = NULL
 AS
 BEGIN
@@ -375,14 +382,51 @@ BEGIN
 
         DECLARE @DonorId UNIQUEIDENTIFIER;
         DECLARE @ExistingUserId UNIQUEIDENTIFIER;
+        DECLARE @LaNhomMauHiem BIT;
 
-        SELECT @DonorId = id, @ExistingUserId = userId
+        SELECT @DonorId = id, @ExistingUserId = userId, @LaNhomMauHiem = laNhomMauHiem
         FROM dbo.Donors WITH (UPDLOCK, ROWLOCK)
-        WHERE cccd = @CCCD AND ngaySinh = @NgaySinh;
+        WHERE cccd = @CCCD;
 
-        -- Khong tiet lo chi tiet vi sao khong khop
-        IF @DonorId IS NULL OR @ExistingUserId IS NOT NULL
-            THROW 50061, N'Thông tin xác minh hồ sơ hiến máu không hợp lệ hoặc đã có tài khoản liên kết.', 1;
+        IF @DonorId IS NOT NULL
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM dbo.Donors WHERE id = @DonorId AND ngaySinh = @NgaySinh)
+                THROW 50061, N'Thông tin xác minh hồ sơ hiến máu không hợp lệ hoặc đã có tài khoản liên kết.', 1;
+
+            IF @ExistingUserId IS NOT NULL
+                THROW 50061, N'Thông tin xác minh hồ sơ hiến máu không hợp lệ hoặc đã có tài khoản liên kết.', 1;
+
+            IF @LaNhomMauHiem = 0
+            BEGIN
+                UPDATE dbo.Donors
+                SET soDienThoai = ISNULL(@SoDienThoai, soDienThoai),
+                    diaChi = ISNULL(@DiaChi, diaChi),
+                    updatedAt = SYSUTCDATETIME()
+                WHERE id = @DonorId;
+            END;
+        END
+        ELSE
+        BEGIN
+            IF @HoTen IS NOT NULL
+            BEGIN
+                IF @GioiTinh IS NULL OR @SoDienThoai IS NULL OR @DiaChi IS NULL
+                    THROW 50067, N'Hồ sơ người hiến mới cần cung cấp đầy đủ họ tên, giới tính, số điện thoại và địa chỉ.', 1;
+
+                SET @DonorId = NEWID();
+                INSERT INTO dbo.Donors (
+                    id, cccd, hoTen, ngaySinh, gioiTinh, soDienThoai, diaChi,
+                    nhomMau, rhFactor, laNhomMauHiem, userId
+                )
+                VALUES (
+                    @DonorId, @CCCD, @HoTen, @NgaySinh, @GioiTinh, @SoDienThoai, @DiaChi,
+                    @NhomMau, @RhFactor, 0, NULL
+                );
+            END
+            ELSE
+            BEGIN
+                THROW 50061, N'Thông tin xác minh hồ sơ hiến máu không hợp lệ hoặc đã có tài khoản liên kết.', 1;
+            END;
+        END;
 
         DECLARE @UserId UNIQUEIDENTIFIER = NEWID();
 
@@ -428,7 +472,7 @@ BEGIN
         DECLARE @DonorId UNIQUEIDENTIFIER;
         SELECT @DonorId = id
         FROM dbo.Donors WITH (UPDLOCK, ROWLOCK)
-        WHERE cccd = @CCCD AND ngaySinh = @NgaySinh AND userId IS NULL;
+        WHERE cccd = @CCCD AND ngaySinh = @NgaySinh AND (userId IS NULL OR userId = @UserId);
 
         IF @DonorId IS NULL
             THROW 50062, N'Không tìm thấy hồ sơ người hiến hợp lệ để liên kết.', 1;
@@ -453,6 +497,93 @@ BEGIN
         COMMIT TRANSACTION;
 
         SELECT @UserId AS userId, @DonorId AS donorId, 'ACTIVE' AS trangThai;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ----------------------------------------------------------------------------
+-- sp_GetDonorProfile: Truy van ho so ca nhan nguoi dung / benh vien theo userId
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.sp_GetDonorProfile
+    @UserId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        u.id AS userId,
+        u.email,
+        u.vaiTro,
+        u.trangThai,
+        u.hospitalId,
+        u.laNguoiPheDuyet,
+        u.emailDaXacThuc,
+        u.createdAt,
+        d.id AS donorId,
+        d.cccd,
+        d.hoTen,
+        d.ngaySinh,
+        d.gioiTinh,
+        d.soDienThoai,
+        d.diaChi,
+        d.nhomMau,
+        d.rhFactor,
+        d.laNhomMauHiem,
+        h.tenBenhVien,
+        h.diaChi AS diaChiBenhVien,
+        h.hotlineCapCuu
+    FROM dbo.Users u
+    LEFT JOIN dbo.Donors d ON d.userId = u.id
+    LEFT JOIN dbo.Hospitals h ON h.id = u.hospitalId
+    WHERE u.id = @UserId;
+END;
+GO
+
+-- ----------------------------------------------------------------------------
+-- sp_UpdateDonorProfile: Nguoi hien cap nhat so dien thoai va dia chi lien lac
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.sp_UpdateDonorProfile
+    @UserId UNIQUEIDENTIFIER,
+    @SoDienThoai VARCHAR(15),
+    @DiaChi NVARCHAR(300),
+    @DiaChiIP VARCHAR(45) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @DonorId UNIQUEIDENTIFIER;
+        DECLARE @LaNhomMauHiem BIT;
+
+        SELECT @DonorId = id, @LaNhomMauHiem = laNhomMauHiem
+        FROM dbo.Donors WITH (UPDLOCK, ROWLOCK)
+        WHERE userId = @UserId;
+
+        IF @DonorId IS NULL
+            THROW 50064, N'Không tìm thấy hồ sơ người hiến liên kết với tài khoản này.', 1;
+
+        IF @LaNhomMauHiem = 0
+        BEGIN
+            UPDATE dbo.Donors
+            SET soDienThoai = @SoDienThoai,
+                diaChi = @DiaChi,
+                updatedAt = SYSUTCDATETIME()
+            WHERE id = @DonorId;
+        END;
+
+        DECLARE @LogDetail NVARCHAR(500) = CONCAT(N'userId=', @UserId, N'; donorId=', @DonorId);
+        EXEC dbo.sp_WriteAuditLog @UserId, 'DONOR_PROFILE_UPDATED', @LogDetail, @DiaChiIP;
+
+        COMMIT TRANSACTION;
+
+        SELECT @DonorId AS donorId, @LaNhomMauHiem AS laNhomMauHiem;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;

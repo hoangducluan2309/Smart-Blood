@@ -49,6 +49,7 @@ const SP_ERROR_MAP: Readonly<Record<number, { statusCode: number; code: string }
   50064: { statusCode: 404, code: 'USER_NOT_FOUND' },
   50065: { statusCode: 400, code: 'CANNOT_LOCK_SELF' },
   50066: { statusCode: 403, code: 'FORBIDDEN_ADMIN_ACTION' },
+  50067: { statusCode: 422, code: 'MISSING_DONOR_PROFILE_FIELDS' },
 };
 
 function mapDatabaseError(err: unknown): AppError | null {

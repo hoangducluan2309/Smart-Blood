@@ -89,6 +89,20 @@ export async function queryEvents(query: ListEventsQuery): Promise<{
   return { rows: rowsResult.recordset, total: countResult.recordset[0]?.total ?? 0 };
 }
 
+export async function queryPublicEvents(): Promise<EventRow[]> {
+  const req = mainPool.request();
+  const rowsResult = await req.query<EventRow>(`
+    SELECT TOP 12 id, maSuKien, tenSuKien, diaDiem, diaChiChiTiet, ngayToChuc,
+      CONVERT(VARCHAR(8), gioBatDau, 108) AS gioBatDau,
+      CONVERT(VARCHAR(8), gioKetThuc, 108) AS gioKetThuc,
+      chiTieuSoLuong, soLuongThucTe, qrCodeUrl, ghiChu, trangThai, createdAt
+    FROM dbo.DonationEvents
+    WHERE trangThai IN ('ACTIVE', 'UPCOMING')
+    ORDER BY CASE WHEN trangThai = 'ACTIVE' THEN 0 ELSE 1 END, createdAt DESC;
+  `);
+  return rowsResult.recordset;
+}
+
 export async function findEventById(eventId: string): Promise<EventRow | null> {
   const req = mainPool.request();
   req.input('EventId', sql.UniqueIdentifier, eventId);

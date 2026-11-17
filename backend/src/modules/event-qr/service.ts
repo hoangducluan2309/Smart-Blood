@@ -11,6 +11,7 @@ import {
   findEventProgress,
   insertDonationEvent,
   queryEvents,
+  queryPublicEvents,
   type EventRow,
 } from './repository.js';
 import type { CreateEventInput, ListEventsQuery } from './schemas.js';
@@ -49,6 +50,10 @@ export async function listDonationEvents(query: ListEventsQuery): Promise<{
     items: rows,
     pagination: buildPaginationMeta({ page: query.page, limit: query.limit, total }),
   };
+}
+
+export async function listPublicEvents(): Promise<EventRow[]> {
+  return queryPublicEvents();
 }
 
 export async function getEventProgressSummary(eventId: string) {

@@ -20,10 +20,19 @@ import {
   generateEventQrAsset,
   getEventProgressSummary,
   listDonationEvents,
+  listPublicEvents,
   updateEventStatus,
 } from './service.js';
 
 export const eventQrRouter = Router();
+
+eventQrRouter.get(
+  '/public',
+  asyncHandler(async (_req, res) => {
+    const data = await listPublicEvents();
+    sendSuccess({ res, data });
+  }),
+);
 
 eventQrRouter.post(
   '/',

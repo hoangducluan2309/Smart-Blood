@@ -311,3 +311,19 @@ export async function queryAuditLogs(limit = 50) {
   `);
   return res.recordset;
 }
+
+export async function findRareVaultByDonorId(
+  donorId: string,
+): Promise<RareDonorEncryptedRow | null> {
+  const req = mainPool.request();
+  req.input('DonorId', sql.UniqueIdentifier, donorId);
+  const res = await req.query<RareDonorEncryptedRow>(`
+    SELECT v.donorId, d.hoTen, v.nhomMauHiem, v.keyVersion,
+      v.encryptedPhone, v.ivPhone, v.authTagPhone,
+      v.encryptedAddress, v.ivAddress, v.authTagAddress
+    FROM dbo.RareBloodVault v
+    INNER JOIN dbo.Donors d ON d.id = v.donorId
+    WHERE v.donorId = @DonorId;
+  `);
+  return res.recordset[0] ?? null;
+}
