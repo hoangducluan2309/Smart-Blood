@@ -15,6 +15,7 @@ import {
   loginSchema,
   registerDonorSchema,
   resetPasswordSchema,
+  updateDonorProfileSchema,
   verifyEmailOtpSchema,
   type AdminUpdateUserStatusInput,
   type AdminUserListQuery,
@@ -23,17 +24,20 @@ import {
   type LoginInput,
   type RegisterDonorInput,
   type ResetPasswordInput,
+  type UpdateDonorProfileInput,
   type VerifyEmailOtpInput,
 } from './schemas.js';
 import {
   generateDonorCertificatePdf,
   getDonorDonationHistory,
+  getUserProfile,
   listUsersForAdmin,
   loginAccount,
   registerDonorAccount,
   requestForgotPasswordOtp,
   resetPasswordWithOtp,
   updateAdminUserStatus,
+  updateDonorProfile,
   verifyDonorEmailOtp,
 } from './service.js';
 
@@ -102,6 +106,53 @@ authRouter.post(
     const input = req.body as ResetPasswordInput;
     await resetPasswordWithOtp({ input, ip: req.ip ?? null });
     sendSuccess({ res, data: { updated: true }, message: 'Đổi mật khẩu thành công' });
+  }),
+);
+
+authRouter.get(
+  '/me',
+  verifyJwt,
+  asyncHandler(async (req, res) => {
+    const profile = await getUserProfile(req.user!);
+    sendSuccess({
+      res,
+      data: profile,
+      message: 'Lấy thông tin tài khoản thành công',
+    });
+  }),
+);
+
+donorPortalRouter.get(
+  '/profile',
+  verifyJwt,
+  requireRole('REGISTERED_DONOR'),
+  asyncHandler(async (req, res) => {
+    const profile = await getUserProfile(req.user!);
+    sendSuccess({
+      res,
+      data: profile.profile,
+      message: 'Lấy thông tin cá nhân người hiến máu thành công',
+    });
+  }),
+);
+
+donorPortalRouter.patch(
+  '/profile',
+  verifyJwt,
+  requireRole('REGISTERED_DONOR'),
+  validateBody(updateDonorProfileSchema),
+  asyncHandler(async (req, res) => {
+    const input = req.body as UpdateDonorProfileInput;
+    const updated = await updateDonorProfile({
+      userId: req.user!.userId,
+      input,
+      ip: req.ip ?? null,
+    });
+    sendSuccess({
+      res,
+      data: updated.profile,
+      message: 'Cập nhật thông tin cá nhân thành công',
+    });
   }),
 );
 

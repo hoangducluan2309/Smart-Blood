@@ -384,4 +384,82 @@ describe('integration: brute-force lock & admin user unlock management', () => {
     assert.equal(blockedLogin.status, 403);
     assert.equal(blockedLogin.body.error?.code, 'ACCOUNT_LOCKED_BY_ADMIN');
   });
+
+  it('should support full donor registration with personal info, /auth/me, and profile update', async () => {
+    const rawCccd = `079${Date.now().toString().slice(-9)}`;
+    const email = `newdonor.${rawCccd}@smartblood-test.vn`;
+    const password = 'DonorPass@2026';
+
+    const reg = await apiRequest<{ userId: string }>(baseUrl, {
+      method: 'POST',
+      path: '/api/v1/auth/register-donor',
+      body: {
+        cccd: rawCccd,
+        ngaySinh: '1995-10-20',
+        email,
+        matKhau: password,
+        hoTen: 'Trần Văn Mới',
+        gioiTinh: 'NAM',
+        soDienThoai: '0912345678',
+        diaChi: '123 Đường 30/4, Biên Hòa, Đồng Nai',
+        nhomMau: 'O',
+        rhFactor: '+',
+      },
+    });
+    assert.equal(reg.status, 201);
+    const userId = reg.body.data!.userId;
+
+    const otpState = memoryStore.get<{ otp: string }>(`otp:verify:${email}`);
+    assert.ok(otpState?.otp);
+
+    const verify = await apiRequest<{
+      accessToken: string;
+      profile: { hoTen: string; soDienThoai: string };
+    }>(baseUrl, {
+      method: 'POST',
+      path: '/api/v1/auth/verify-email-otp',
+      body: {
+        email,
+        cccd: rawCccd,
+        ngaySinh: '1995-10-20',
+        otp: otpState.otp,
+      },
+    });
+    assert.equal(verify.status, 200);
+    assert.equal(verify.body.data?.profile?.hoTen, 'Trần Văn Mới');
+    assert.equal(verify.body.data?.profile?.soDienThoai, '0912345678');
+    const donorToken = verify.body.data!.accessToken;
+
+    const meRes = await apiRequest<{
+      profile: { cccd: string; hoTen: string; soDienThoai: string; diaChi: string };
+    }>(baseUrl, {
+      method: 'GET',
+      path: '/api/v1/auth/me',
+      token: donorToken,
+    });
+    assert.equal(meRes.status, 200);
+    assert.equal(meRes.body.data?.profile?.cccd, rawCccd);
+    assert.equal(meRes.body.data?.profile?.hoTen, 'Trần Văn Mới');
+
+    const profileRes = await apiRequest<{ hoTen: string; diaChi: string }>(baseUrl, {
+      method: 'GET',
+      path: '/api/v1/donor/profile',
+      token: donorToken,
+    });
+    assert.equal(profileRes.status, 200);
+    assert.equal(profileRes.body.data?.hoTen, 'Trần Văn Mới');
+
+    const updateRes = await apiRequest<{ soDienThoai: string; diaChi: string }>(baseUrl, {
+      method: 'PATCH',
+      path: '/api/v1/donor/profile',
+      token: donorToken,
+      body: {
+        soDienThoai: '0987654321',
+        diaChi: '456 Cách Mạng Tháng 8, Biên Hòa, Đồng Nai',
+      },
+    });
+    assert.equal(updateRes.status, 200);
+    assert.equal(updateRes.body.data?.soDienThoai, '0987654321');
+    assert.equal(updateRes.body.data?.diaChi, '456 Cách Mạng Tháng 8, Biên Hòa, Đồng Nai');
+  });
 });

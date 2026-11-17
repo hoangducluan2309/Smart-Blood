@@ -9,6 +9,25 @@ export const registerDonorSchema = z.object({
   ngaySinh: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày sinh theo định dạng YYYY-MM-DD'),
   email: z.string().trim().email('Email không hợp lệ').max(255),
   matKhau: z.string().min(8, 'Mật khẩu tối thiểu 8 ký tự').max(128),
+  hoTen: z.string().trim().min(2, 'Họ tên tối thiểu 2 ký tự').max(150).optional(),
+  gioiTinh: z.enum(['NAM', 'NU', 'KHAC']).optional(),
+  soDienThoai: z
+    .string()
+    .trim()
+    .regex(/^0[0-9]{9,10}$/, 'Số điện thoại không hợp lệ')
+    .optional(),
+  diaChi: z.string().trim().max(255).optional(),
+  nhomMau: z.enum(['A', 'B', 'AB', 'O']).optional(),
+  rhFactor: z.enum(['+', '-']).optional(),
+});
+
+export const updateDonorProfileSchema = z.object({
+  soDienThoai: z
+    .string()
+    .trim()
+    .regex(/^0[0-9]{9,10}$/, 'Số điện thoại không hợp lệ')
+    .optional(),
+  diaChi: z.string().trim().min(5, 'Địa chỉ tối thiểu 5 ký tự').max(255).optional(),
 });
 
 export const verifyEmailOtpSchema = z.object({
@@ -61,6 +80,7 @@ export type VerifyEmailOtpInput = z.infer<typeof verifyEmailOtpSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type UpdateDonorProfileInput = z.infer<typeof updateDonorProfileSchema>;
 export type HistoryListQuery = z.infer<typeof historyListQuerySchema>;
 export type AdminUserListQuery = z.infer<typeof adminUserListQuerySchema>;
 export type AdminUpdateUserStatusInput = z.infer<typeof adminUpdateUserStatusSchema>;

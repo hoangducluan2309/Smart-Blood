@@ -10,19 +10,30 @@ import { AppError } from '../../shared/app-error.js';
 import { buildOtpEmailHtml, sendEmail } from '../../shared/mailer.js';
 import { memoryStore, TTL_POLICIES } from '../../shared/memory-store.js';
 import { buildPaginationMeta } from '../../shared/pagination.js';
-import type { AuthUser } from '../../types/domain.js';
+import { decryptVaultField } from '../../shared/vault-crypto.js';
+import type {
+  AuthUser,
+  DonorProfile,
+  HospitalProfile,
+  UserProfileResponse,
+} from '../../types/domain.js';
+import { findRareVaultByDonorId } from '../inventory-vault/repository.js';
+import { sealRareBloodContactValues } from '../inventory-vault/service.js';
 import {
   callActivateDonorAccount,
   callAdminUpdateUserStatus,
   callRecordAuthAudit,
   callRegisterDonorAccount,
+  callUpdateDonorProfile,
   callUpdateUserPassword,
   findDonorCertificateRecord,
   findUserByEmail,
   findUserByEmailOrCccd,
   queryAdminUsers,
   queryDonorHistory,
+  queryUserProfile,
   type CertificateRow,
+  type RawUserProfileRow,
   type UserAuthRow,
 } from './repository.js';
 import type {
@@ -33,6 +44,7 @@ import type {
   LoginInput,
   RegisterDonorInput,
   ResetPasswordInput,
+  UpdateDonorProfileInput,
   VerifyEmailOtpInput,
 } from './schemas.js';
 
@@ -87,25 +99,14 @@ function consumeOtpCode(options: {
   return state;
 }
 
-export async function registerDonorAccount(options: {
-  input: RegisterDonorInput;
-  ip: string | null;
-}) {
-  const matKhauHash = await bcrypt.hash(options.input.matKhau, BCRYPT_SALT_ROUNDS);
-  const created = await callRegisterDonorAccount({
-    cccd: options.input.cccd,
-    ngaySinh: options.input.ngaySinh,
-    email: options.input.email,
-    matKhauHash,
-    ip: options.ip,
-  });
+async function sendRegistrationVerificationEmail(email: string, userId: string): Promise<void> {
   const otp = generateSixDigitOtp();
-  memoryStore.set<EmailOtpState>(`otp:verify:${options.input.email}`, {
-    value: { otp, userId: created.userId, attempts: 0 },
+  memoryStore.set<EmailOtpState>(`otp:verify:${email}`, {
+    value: { otp, userId, attempts: 0 },
     ttlSeconds: TTL_POLICIES.EMAIL_OTP_SECONDS,
   });
   await sendEmail({
-    to: options.input.email,
+    to: email,
     subject: '[SmartBlood] Mã OTP xác minh tài khoản người hiến máu',
     html: buildOtpEmailHtml({
       title: 'Xác minh địa chỉ email của bạn',
@@ -113,6 +114,19 @@ export async function registerDonorAccount(options: {
       description: 'Nhập mã OTP dưới đây để kích hoạt tài khoản và liên kết lịch sử hiến máu.',
     }),
   });
+}
+
+export async function registerDonorAccount(options: {
+  input: RegisterDonorInput;
+  ip: string | null;
+}) {
+  const matKhauHash = await bcrypt.hash(options.input.matKhau, BCRYPT_SALT_ROUNDS);
+  const created = await callRegisterDonorAccount({
+    ...options.input,
+    matKhauHash,
+    ip: options.ip,
+  });
+  await sendRegistrationVerificationEmail(options.input.email, created.userId);
   return { userId: created.userId, email: created.email, trangThai: created.trangThai };
 }
 
@@ -138,7 +152,12 @@ export async function verifyDonorEmailOtp(options: {
     hospitalId: null,
     laNguoiPheDuyet: false,
   };
-  return { accessToken: signAccessToken(authUser), user: authUser };
+  const profile = await getUserProfile(authUser);
+  return {
+    accessToken: signAccessToken(authUser),
+    user: authUser,
+    profile: profile.profile,
+  };
 }
 
 async function notifyTempLockWarning(options: {
@@ -236,7 +255,7 @@ function assertAccountNotLocked(user: UserAuthRow): void {
   }
 }
 
-function buildLoginResponse(user: UserAuthRow) {
+async function buildLoginResponse(user: UserAuthRow) {
   const authUser: AuthUser = {
     userId: user.id,
     email: user.email,
@@ -244,7 +263,12 @@ function buildLoginResponse(user: UserAuthRow) {
     hospitalId: user.hospitalId,
     laNguoiPheDuyet: user.laNguoiPheDuyet,
   };
-  return { accessToken: signAccessToken(authUser), user: authUser };
+  const profile = await getUserProfile(authUser);
+  return {
+    accessToken: signAccessToken(authUser),
+    user: authUser,
+    profile: profile.profile,
+  };
 }
 
 export async function loginAccount(input: LoginInput, ip: string | null = null) {
@@ -457,4 +481,100 @@ export async function updateAdminUserStatus(options: {
     memoryStore.delete(`lock:user:${options.targetUserId}`);
   }
   return { ...updated, tempLocked: false };
+}
+
+async function decryptRareDonorContact(row: RawUserProfileRow): Promise<{
+  soDienThoai: string | null;
+  diaChi: string | null;
+}> {
+  if (!row.donorId) {
+    return { soDienThoai: null, diaChi: null };
+  }
+  const vault = await findRareVaultByDonorId(row.donorId);
+  if (!vault) {
+    return { soDienThoai: null, diaChi: null };
+  }
+  const phone = decryptVaultField(
+    { ciphertext: vault.encryptedPhone, iv: vault.ivPhone, authTag: vault.authTagPhone },
+    vault.keyVersion,
+  );
+  const address = decryptVaultField(
+    { ciphertext: vault.encryptedAddress, iv: vault.ivAddress, authTag: vault.authTagAddress },
+    vault.keyVersion,
+  );
+  return { soDienThoai: phone, diaChi: address };
+}
+
+function mapHospitalProfile(row: RawUserProfileRow): HospitalProfile {
+  return {
+    hospitalId: row.hospitalId!,
+    tenBenhVien: row.tenBenhVien ?? '',
+    diaChi: row.benhVienDiaChi ?? '',
+    soDienThoai: row.benhVienSoDienThoai ?? '',
+  };
+}
+
+async function mapDonorProfile(row: RawUserProfileRow): Promise<DonorProfile> {
+  let soDienThoai = row.soDienThoai;
+  let diaChi = row.diaChi;
+  if (row.laNhomMauHiem && (!soDienThoai || !diaChi)) {
+    const rareContact = await decryptRareDonorContact(row);
+    soDienThoai = rareContact.soDienThoai ?? soDienThoai;
+    diaChi = rareContact.diaChi ?? diaChi;
+  }
+  return {
+    donorId: row.donorId!,
+    cccd: row.cccd ?? '',
+    hoTen: row.hoTen ?? '',
+    ngaySinh: row.ngaySinh instanceof Date ? row.ngaySinh.toISOString().slice(0, 10) : '',
+    gioiTinh: row.gioiTinh ?? '',
+    soDienThoai,
+    diaChi,
+    nhomMau: row.nhomMau,
+    rhFactor: row.rhFactor,
+    laNhomMauHiem: Boolean(row.laNhomMauHiem),
+  };
+}
+
+export async function getUserProfile(user: AuthUser): Promise<UserProfileResponse> {
+  const row = await queryUserProfile(user.userId);
+  if (!row || row.profileType === 'NONE') {
+    return { user, profile: null };
+  }
+  if (row.profileType === 'HOSPITAL') {
+    return { user, profile: mapHospitalProfile(row) };
+  }
+  const donorProfile = await mapDonorProfile(row);
+  return { user, profile: donorProfile };
+}
+
+export async function updateDonorProfile(options: {
+  userId: string;
+  input: UpdateDonorProfileInput;
+  ip: string | null;
+}) {
+  const res = await callUpdateDonorProfile({
+    userId: options.userId,
+    soDienThoai: options.input.soDienThoai,
+    diaChi: options.input.diaChi,
+    ip: options.ip,
+  });
+  if (res.laNhomMauHiem && options.input.soDienThoai && options.input.diaChi) {
+    await sealRareBloodContactValues({
+      donorId: res.donorId,
+      nhomMauHiem: 'RARE',
+      soDienThoai: options.input.soDienThoai,
+      diaChi: options.input.diaChi,
+      actorId: options.userId,
+      ip: options.ip,
+    });
+  }
+  const user: AuthUser = {
+    userId: options.userId,
+    email: '',
+    vaiTro: 'REGISTERED_DONOR',
+    hospitalId: null,
+    laNguoiPheDuyet: false,
+  };
+  return getUserProfile(user);
 }

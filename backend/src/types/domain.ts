@@ -35,6 +35,31 @@ export interface AuthUser {
   laNguoiPheDuyet: boolean;
 }
 
+export interface DonorProfile {
+  donorId: string;
+  cccd: string;
+  hoTen: string;
+  ngaySinh: string;
+  gioiTinh: string;
+  soDienThoai: string | null;
+  diaChi: string | null;
+  nhomMau: BloodType | null;
+  rhFactor: RhFactor | null;
+  laNhomMauHiem: boolean;
+}
+
+export interface HospitalProfile {
+  hospitalId: string;
+  tenBenhVien: string;
+  diaChi: string;
+  soDienThoai: string;
+}
+
+export interface UserProfileResponse {
+  user: AuthUser;
+  profile: DonorProfile | HospitalProfile | null;
+}
+
 export interface PaginationMeta {
   page: number;
   limit: number;

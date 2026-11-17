@@ -11,3 +11,4 @@ logs/
 coverage/
 .DS_Store
 Thumbs.db
+frontend/
